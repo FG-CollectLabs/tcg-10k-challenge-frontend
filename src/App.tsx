@@ -25,7 +25,7 @@ function Nav() {
 
 export default function App() {
   return (
-    <BrowserRouter basename="/tcg-10k-challenge">
+    <BrowserRouter basename="/tcg-10k-challenge-frontend">
       <div className="min-h-screen flex flex-col">
         <Nav />
         <main className="flex-1 p-6 max-w-7xl mx-auto w-full">

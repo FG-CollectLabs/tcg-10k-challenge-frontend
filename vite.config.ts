@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/tcg-10k-challenge/',
+  base: '/tcg-10k-challenge-frontend/',
 })
