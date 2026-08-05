@@ -1,19 +1,20 @@
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8083'
+import { auth } from '../firebase'
 
-function getToken(): string | null {
-  return localStorage.getItem('challenge_admin_token')
-}
+const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8083'
 
 async function request<T>(
   path: string,
   opts: RequestInit = {}
 ): Promise<T> {
-  const token = getToken()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string>),
   }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  const user = auth.currentUser
+  if (user) {
+    const idToken = await user.getIdToken()
+    headers['Authorization'] = `Bearer ${idToken}`
+  }
 
   const res = await fetch(`${BASE}${path}`, { ...opts, headers })
   if (!res.ok) {
@@ -117,5 +118,4 @@ const api = {
   getMonthly: () => request<MonthlyRow[]>('/v1/monthly'),
 }
 
-export { getToken }
 export default api
