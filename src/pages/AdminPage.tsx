@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from '../firebase'
 import type { User } from '../firebase'
-import api, { Purchase, Sale, PurchaseInput, SaleInput } from '../api/client'
+import api, { Purchase, Sale, PurchaseInput, SaleInput, GameOption, PurchaseSource } from '../api/client'
 
 function fmtUSD(n: number) {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -53,6 +53,8 @@ const EMPTY_PURCHASE: PurchaseInput = {
   game: '',
   set_name: '',
   product_type: 'Booster Box',
+  purchase_source: null,
+  purchase_source_detail: null,
   date_purchased: new Date().toISOString().slice(0, 10),
   qty_purchased: 1,
   cost_per_unit: 0,
@@ -62,14 +64,24 @@ const EMPTY_PURCHASE: PurchaseInput = {
   notes: null,
 }
 
+const SOURCE_CAT_LABELS: Record<string, string> = {
+  paywall_access: 'Paywall Access',
+  in_person: 'In Person',
+  online_shipped: 'Online Shipped',
+}
+
 function PurchaseForm({
   initial,
   onSave,
   onCancel,
+  gameOptions,
+  purchaseSources,
 }: {
   initial: PurchaseInput
   onSave: (data: PurchaseInput) => Promise<void>
   onCancel: () => void
+  gameOptions: GameOption[]
+  purchaseSources: PurchaseSource[]
 }) {
   const [form, setForm] = useState<PurchaseInput>(initial)
   const [saving, setSaving] = useState(false)
@@ -105,22 +117,57 @@ function PurchaseForm({
       step={type === 'number' ? '0.01' : undefined}
     />
   )
+  const sel = (val: string, onChange: (v: string) => void, children: React.ReactNode) => (
+    <select
+      className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm"
+      value={val}
+      onChange={e => onChange(e.target.value)}
+    >
+      {children}
+    </select>
+  )
+
+  const cats = ['paywall_access', 'in_person', 'online_shipped'] as const
 
   return (
     <form onSubmit={submit} className="space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        {field('Game *', inp('text', form.game, v => set('game', v), true))}
+        {field('Game *',
+          sel(form.game, v => set('game', v),
+            <>
+              <option value="">— select game —</option>
+              {gameOptions.map(g => <option key={g.id} value={g.name}>{g.name}</option>)}
+            </>
+          )
+        )}
         {field('Set Name *', inp('text', form.set_name, v => set('set_name', v), true))}
         {field('Product Type *',
-          <select
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm"
-            value={form.product_type}
-            onChange={e => set('product_type', e.target.value)}
-          >
-            {['Booster Box', 'Booster Box Case', 'Booster Pack', 'Commander Deck', 'Display Box', 'Draft Set', 'Starter Deck', 'Other'].map(v =>
-              <option key={v}>{v}</option>
-            )}
-          </select>
+          sel(form.product_type, v => set('product_type', v),
+            ['Booster Box', 'Booster Box Case', 'Booster Pack', 'Commander Deck', 'Display Box', 'Draft Set', 'Starter Deck', 'Other']
+              .map(v => <option key={v}>{v}</option>)
+          )
+        )}
+        {field('Purchase Source',
+          sel(form.purchase_source ?? '', v => {
+            set('purchase_source', v || null)
+            if (v !== 'LGS') set('purchase_source_detail', null)
+          },
+            <>
+              <option value="">— select source —</option>
+              {cats.map(cat => {
+                const srcs = purchaseSources.filter(s => s.category === cat)
+                if (srcs.length === 0) return null
+                return (
+                  <optgroup key={cat} label={SOURCE_CAT_LABELS[cat]}>
+                    {srcs.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                  </optgroup>
+                )
+              })}
+            </>
+          )
+        )}
+        {form.purchase_source === 'LGS' && field('Which LGS?',
+          inp('text', form.purchase_source_detail ?? '', v => set('purchase_source_detail', v || null))
         )}
         {field('Date Purchased *', inp('date', form.date_purchased, v => set('date_purchased', v), true))}
         {field('Qty *', inp('number', form.qty_purchased, v => set('qty_purchased', parseInt(v) || 0), true))}
@@ -250,12 +297,17 @@ function PurchaseRow({
     setSales(s => s?.filter(x => x.id !== id) ?? null)
   }
 
+  const sourceLabel = p.purchase_source
+    ? p.purchase_source_detail ? `${p.purchase_source} — ${p.purchase_source_detail}` : p.purchase_source
+    : '—'
+
   return (
     <>
       <tr className="border-b border-gray-800/50 text-xs hover:bg-gray-800/20">
         <td className="py-2 font-medium">{p.game}</td>
         <td className="py-2">{p.set_name}</td>
         <td className="py-2 text-gray-400">{p.product_type}</td>
+        <td className="py-2 text-gray-400">{sourceLabel}</td>
         <td className="text-right py-2">{p.date_purchased}</td>
         <td className="text-right py-2">{p.qty_purchased}</td>
         <td className="text-right py-2">${p.cost_per_unit.toFixed(2)}</td>
@@ -280,7 +332,7 @@ function PurchaseRow({
       </tr>
       {showSales && sales && sales.length > 0 && (
         <tr className="bg-gray-800/20">
-          <td colSpan={11} className="px-4 pb-3">
+          <td colSpan={12} className="px-4 pb-3">
             <table className="w-full text-xs mt-2">
               <thead>
                 <tr className="text-gray-500">
@@ -314,8 +366,139 @@ function PurchaseRow({
   )
 }
 
+function ConfigManager({
+  games,
+  sources,
+  onRefresh,
+}: {
+  games: GameOption[]
+  sources: PurchaseSource[]
+  onRefresh: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [newGame, setNewGame] = useState('')
+  const [newSrc, setNewSrc] = useState({ name: '', category: 'online_shipped' })
+  const [busy, setBusy] = useState(false)
+
+  async function addGame() {
+    if (!newGame.trim()) return
+    setBusy(true)
+    try { await api.createGameOption(newGame.trim()); setNewGame(''); onRefresh() }
+    finally { setBusy(false) }
+  }
+
+  async function removeGame(id: string) {
+    if (!confirm('Remove this game from the list?')) return
+    await api.deleteGameOption(id); onRefresh()
+  }
+
+  async function addSource() {
+    if (!newSrc.name.trim()) return
+    setBusy(true)
+    try { await api.createPurchaseSource(newSrc); setNewSrc(s => ({ ...s, name: '' })); onRefresh() }
+    finally { setBusy(false) }
+  }
+
+  async function removeSource(id: string) {
+    if (!confirm('Remove this source from the list?')) return
+    await api.deletePurchaseSource(id); onRefresh()
+  }
+
+  const cats = ['paywall_access', 'in_person', 'online_shipped'] as const
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-lg">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-300 hover:text-white"
+      >
+        <span>Manage Lists</span>
+        <span className="text-gray-500">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-5 pt-4 border-t border-gray-800 grid md:grid-cols-2 gap-8">
+          {/* Games */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-yellow-400">Games</h3>
+            <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+              {games.map(g => (
+                <div key={g.id} className="flex items-center justify-between text-sm py-0.5">
+                  <span>{g.name}</span>
+                  <button onClick={() => removeGame(g.id)}
+                    className="text-red-400 hover:text-red-300 text-xs px-1">✕</button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm"
+                placeholder="New game name"
+                value={newGame}
+                onChange={e => setNewGame(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addGame())}
+              />
+              <button onClick={addGame} disabled={busy || !newGame.trim()}
+                className="bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-black font-semibold px-3 py-1 rounded text-sm">
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Purchase Sources */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-yellow-400">Purchase Sources</h3>
+            <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+              {cats.map(cat => {
+                const catSrcs = sources.filter(s => s.category === cat)
+                if (catSrcs.length === 0) return null
+                return (
+                  <div key={cat}>
+                    <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">{SOURCE_CAT_LABELS[cat]}</div>
+                    {catSrcs.map(s => (
+                      <div key={s.id} className="flex items-center justify-between text-sm py-0.5 pl-2">
+                        <span>{s.name}</span>
+                        <button onClick={() => removeSource(s.id)}
+                          className="text-red-400 hover:text-red-300 text-xs px-1">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="space-y-2">
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm"
+                placeholder="New source name"
+                value={newSrc.name}
+                onChange={e => setNewSrc(s => ({ ...s, name: e.target.value }))}
+              />
+              <div className="flex gap-2">
+                <select
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm"
+                  value={newSrc.category}
+                  onChange={e => setNewSrc(s => ({ ...s, category: e.target.value }))}
+                >
+                  <option value="paywall_access">Paywall Access</option>
+                  <option value="in_person">In Person</option>
+                  <option value="online_shipped">Online Shipped</option>
+                </select>
+                <button onClick={addSource} disabled={busy || !newSrc.name.trim()}
+                  className="bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-black font-semibold px-3 py-1 rounded text-sm">
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AdminDashboard({ user }: { user: User }) {
   const [purchases, setPurchases] = useState<Purchase[]>([])
+  const [gameOptions, setGameOptions] = useState<GameOption[]>([])
+  const [purchaseSources, setPurchaseSources] = useState<PurchaseSource[]>([])
   const [editId, setEditId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [saleFor, setSaleFor] = useState<Purchase | null>(null)
@@ -329,7 +512,15 @@ function AdminDashboard({ user }: { user: User }) {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  async function loadConfig() {
+    try {
+      const [games, sources] = await Promise.all([api.getGameOptions(), api.getPurchaseSources()])
+      setGameOptions(games)
+      setPurchaseSources(sources)
+    } catch {}
+  }
+
+  useEffect(() => { load(); loadConfig() }, [])
 
   if (loading) return <div className="text-gray-400">Loading…</div>
 
@@ -388,7 +579,13 @@ function AdminDashboard({ user }: { user: User }) {
       {showCreate && (
         <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
           <h2 className="text-sm font-semibold text-yellow-400 mb-4">New Purchase</h2>
-          <PurchaseForm initial={EMPTY_PURCHASE} onSave={handleCreate} onCancel={() => setShowCreate(false)} />
+          <PurchaseForm
+            initial={EMPTY_PURCHASE}
+            onSave={handleCreate}
+            onCancel={() => setShowCreate(false)}
+            gameOptions={gameOptions}
+            purchaseSources={purchaseSources}
+          />
         </div>
       )}
 
@@ -401,6 +598,8 @@ function AdminDashboard({ user }: { user: User }) {
               game: editing.game,
               set_name: editing.set_name,
               product_type: editing.product_type,
+              purchase_source: editing.purchase_source,
+              purchase_source_detail: editing.purchase_source_detail,
               date_purchased: editing.date_purchased,
               qty_purchased: editing.qty_purchased,
               cost_per_unit: editing.cost_per_unit,
@@ -411,6 +610,8 @@ function AdminDashboard({ user }: { user: User }) {
             }}
             onSave={handleUpdate}
             onCancel={() => setEditId(null)}
+            gameOptions={gameOptions}
+            purchaseSources={purchaseSources}
           />
         </div>
       )}
@@ -430,6 +631,7 @@ function AdminDashboard({ user }: { user: User }) {
               <th className="text-left px-3 py-2">Game</th>
               <th className="text-left px-3 py-2">Set</th>
               <th className="text-left px-3 py-2">Type</th>
+              <th className="text-left px-3 py-2">Source</th>
               <th className="text-right px-3 py-2">Date</th>
               <th className="text-right px-3 py-2">Qty</th>
               <th className="text-right px-3 py-2">Cost/U</th>
@@ -452,7 +654,12 @@ function AdminDashboard({ user }: { user: User }) {
             ))}
           </tbody>
         </table>
+        {purchases.length === 0 && (
+          <p className="text-gray-500 text-sm text-center py-8">No purchases yet.</p>
+        )}
       </div>
+
+      <ConfigManager games={gameOptions} sources={purchaseSources} onRefresh={loadConfig} />
     </div>
   )
 }

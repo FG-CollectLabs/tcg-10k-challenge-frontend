@@ -25,12 +25,27 @@ async function request<T>(
   return res.json()
 }
 
+export interface GameOption {
+  id: string
+  name: string
+  display_order: number
+}
+
+export interface PurchaseSource {
+  id: string
+  name: string
+  category: 'paywall_access' | 'in_person' | 'online_shipped'
+  display_order: number
+}
+
 export interface Purchase {
   id: string
   tcgplayer_product_id: string | null
   game: string
   set_name: string
   product_type: string
+  purchase_source: string | null
+  purchase_source_detail: string | null
   date_purchased: string
   qty_purchased: number
   cost_per_unit: number
@@ -116,6 +131,16 @@ const api = {
     request<void>(`/v1/sales/${id}`, { method: 'DELETE' }),
   getGames: () => request<GameSummary[]>('/v1/games'),
   getMonthly: () => request<MonthlyRow[]>('/v1/monthly'),
+  getGameOptions: () => request<GameOption[]>('/v1/config/games'),
+  createGameOption: (name: string, display_order = 0) =>
+    request<GameOption>('/v1/admin/config/games', { method: 'POST', body: JSON.stringify({ name, display_order }) }),
+  deleteGameOption: (id: string) =>
+    request<void>(`/v1/admin/config/games/${id}`, { method: 'DELETE' }),
+  getPurchaseSources: () => request<PurchaseSource[]>('/v1/config/sources'),
+  createPurchaseSource: (data: { name: string; category: string }) =>
+    request<PurchaseSource>('/v1/admin/config/sources', { method: 'POST', body: JSON.stringify(data) }),
+  deletePurchaseSource: (id: string) =>
+    request<void>(`/v1/admin/config/sources/${id}`, { method: 'DELETE' }),
 }
 
 export default api
