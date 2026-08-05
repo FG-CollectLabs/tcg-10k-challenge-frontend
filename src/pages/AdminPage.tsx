@@ -143,7 +143,7 @@ function PurchaseForm({
         {field('Set Name *', inp('text', form.set_name, v => set('set_name', v), true))}
         {field('Product Type *',
           sel(form.product_type, v => set('product_type', v),
-            ['Booster Box', 'Booster Box Case', 'Booster Pack', 'Commander Deck', 'Display Box', 'Draft Set', 'Starter Deck', 'Other']
+            ['Booster Box', 'Booster Box Case', 'Elite Trainer Box', 'Elite Trainer Box Case', 'Collection Box', 'Collection Box Case', 'Preconstructed Deck', 'Commander Deck', 'Commander Deck Display', 'Booster Bundle', 'Loose Packs', 'Blister Pack', 'Other']
               .map(v => <option key={v}>{v}</option>)
           )
         )}
@@ -173,7 +173,7 @@ function PurchaseForm({
         {field('Qty *', inp('number', form.qty_purchased, v => set('qty_purchased', parseInt(v) || 0), true))}
         {field('Cost / Unit *', inp('number', form.cost_per_unit, v => set('cost_per_unit', parseFloat(v) || 0), true))}
         {field('Market Price @ Purchase', inp('number', form.market_price_at_purchase ?? '', v => set('market_price_at_purchase', numOrNull(v))))}
-        {field('Distribution Price (MSRP)', inp('number', form.distribution_price ?? '', v => set('distribution_price', numOrNull(v))))}
+        {field('Distribution Price', inp('number', form.distribution_price ?? '', v => set('distribution_price', numOrNull(v))))}
         {field('Current Market Price', inp('number', form.current_market_price ?? '', v => set('current_market_price', numOrNull(v))))}
         {field('TCGPlayer Product ID', inp('text', form.tcgplayer_product_id ?? '', v => set('tcgplayer_product_id', v || null)))}
       </div>
